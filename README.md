@@ -1,6 +1,6 @@
 # AI Hedge Fund Simulator
 
-An AI-powered hedge fund simulator that uses multiple AI agents to paper trade in the stock market in real-time. Each AI has its own investment strategy and personality, reporting to a virtual fund manager named Bill Ackman who makes the final investment decisions.
+An AI-powered hedge fund simulator that uses multiple AI agents to paper trade in the stock market in real-time. Each AI has its own investment strategy and personality, reporting to a virtual fund manager who makes the final investment decisions.
 
 ## Project Overview
 
