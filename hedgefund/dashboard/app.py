@@ -19,7 +19,7 @@ from hedgefund.models import (
     PortfolioSnapshot, Position, Recommendation, ManagerDecision,
     Order, AnalystPerformance, Analyst
 )
-from hedgefund.utils import setup_logging
+from hedgefund.utils import setup_logging, get_eastern_time
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -291,7 +291,7 @@ def update_positions_table(n):
         positions = db.query(Position).all()
         
         # Add timestamp for last update
-        last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        last_updated = get_eastern_time().strftime("%Y-%m-%d %H:%M:%S")
         
         if positions:
             # Create table

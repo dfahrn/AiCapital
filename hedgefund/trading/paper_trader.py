@@ -14,9 +14,10 @@ from hedgefund.config import (
     INITIAL_CAPITAL, MAX_POSITION_SIZE
 )
 from hedgefund.models import (
-    Order, Position, PortfolioSnapshot, OrderStatusEnum
+    Order, Position, PortfolioSnapshot, OrderStatusEnum, SessionLocal
 )
 from hedgefund.data import MarketData
+from hedgefund.utils import get_eastern_time
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -379,39 +380,36 @@ class PaperTrader:
             
         return results
     
-    def take_portfolio_snapshot(self) -> Optional[PortfolioSnapshot]:
+    def take_portfolio_snapshot(self) -> Dict[str, Any]:
         """
-        Take a snapshot of the current portfolio state and save it to the database.
+        Take a snapshot of the current portfolio and save it to the database.
         
         Returns:
-            The created PortfolioSnapshot object or None if an error occurred.
+            A dictionary with the snapshot data.
         """
-        if not self.db:
-            logger.error("Cannot take portfolio snapshot without a database connection")
-            return None
+        # Get current portfolio value
+        portfolio = self.get_portfolio_value()
         
+        # Create snapshot object
+        snapshot = PortfolioSnapshot(
+            date=get_eastern_time(),
+            cash=portfolio["cash"],
+            equity=portfolio["equity"],
+            total_positions_value=portfolio["positions_value"],
+            total_pl=portfolio["total_pl"],
+            total_pl_percent=portfolio["total_pl_percent"],
+            positions_data=portfolio["positions"]
+        )
+        
+        # Save to database
+        db = SessionLocal()
         try:
-            # Get current portfolio value
-            portfolio = self.get_portfolio_value()
-            
-            # Create snapshot
-            snapshot = PortfolioSnapshot(
-                date=datetime.now(),
-                cash=portfolio['cash'],
-                equity=portfolio['equity'],
-                total_positions_value=portfolio['positions_value'],
-                total_pl=portfolio['total_pl'],
-                total_pl_percent=portfolio['total_pl_percent'],
-                positions_data=portfolio['positions']
-            )
-            
-            self.db.add(snapshot)
-            self.db.commit()
-            logger.info(f"Saved portfolio snapshot: ${snapshot.equity:,.2f}")
-            
-            return snapshot
-            
+            db.add(snapshot)
+            db.commit()
         except Exception as e:
-            logger.error(f"Error taking portfolio snapshot: {e}")
-            self.db.rollback()
-            return None 
+            db.rollback()
+            logging.error(f"Error saving portfolio snapshot: {e}")
+        finally:
+            db.close()
+        
+        return portfolio 

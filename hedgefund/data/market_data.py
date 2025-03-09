@@ -13,8 +13,9 @@ from alpha_vantage.timeseries import TimeSeries
 
 from hedgefund.config import (
     ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL,
-    ALPHA_VANTAGE_API_KEY
+    ALPHA_VANTAGE_API_KEY, MARKET_HOURS
 )
+from hedgefund.utils import get_eastern_time
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ class MarketData:
             logger.error(f"Error checking if market is open: {e}")
             
             # Fallback method using datetime
-            now = datetime.now()
+            now = get_eastern_time()
             
             # Check if it's a weekday
             if now.weekday() >= 5:  # 5=Saturday, 6=Sunday
@@ -277,7 +278,11 @@ class MarketData:
             
             # Check if it's between 9:30 AM and 4:00 PM Eastern Time
             # This is a crude check that doesn't account for holidays
-            market_open = now.replace(hour=9, minute=30, second=0)
-            market_close = now.replace(hour=16, minute=0, second=0)
+            market_open = datetime.combine(now.date(), 
+                                          datetime.strptime(MARKET_HOURS["open"], "%H:%M").time(),
+                                          tzinfo=now.tzinfo)
+            market_close = datetime.combine(now.date(), 
+                                           datetime.strptime(MARKET_HOURS["close"], "%H:%M").time(),
+                                           tzinfo=now.tzinfo)
             
             return market_open <= now <= market_close 

@@ -6,8 +6,26 @@ import sys
 import logging
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+import pytz
 
 from hedgefund.config import LOG_LEVEL, LOG_FILE
+
+
+class EasternTimeFormatter(logging.Formatter):
+    """Formatter that converts timestamps to Eastern Time."""
+    
+    def converter(self, timestamp):
+        dt = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+        eastern = pytz.timezone('America/New_York')
+        return dt.astimezone(eastern)
+    
+    def formatTime(self, record, datefmt=None):
+        dt = self.converter(record.created)
+        if datefmt:
+            s = dt.strftime(datefmt)
+        else:
+            s = dt.strftime("%Y-%m-%d %H:%M:%S")
+        return s
 
 
 def setup_logging(log_level: str = LOG_LEVEL, log_file: str = LOG_FILE) -> logging.Logger:
@@ -43,11 +61,11 @@ def setup_logging(log_level: str = LOG_LEVEL, log_file: str = LOG_FILE) -> loggi
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # Create formatters
-    detailed_formatter = logging.Formatter(
+    # Create formatters with Eastern Time
+    detailed_formatter = EasternTimeFormatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
     )
-    console_formatter = logging.Formatter(
+    console_formatter = EasternTimeFormatter(
         '%(asctime)s - %(levelname)s - %(message)s'
     )
     
@@ -77,7 +95,10 @@ def log_performance(logger, portfolio_data: dict):
         portfolio_data: Dictionary with portfolio information.
     """
     try:
-        logger.info(f"Portfolio Performance ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+        from hedgefund.utils import get_eastern_time
+        eastern_time = get_eastern_time().strftime('%Y-%m-%d %H:%M:%S')
+        
+        logger.info(f"Portfolio Performance ({eastern_time})")
         logger.info(f"Cash: ${portfolio_data.get('cash', 0):,.2f}")
         logger.info(f"Positions Value: ${portfolio_data.get('positions_value', 0):,.2f}")
         logger.info(f"Total Equity: ${portfolio_data.get('equity', 0):,.2f}")
