@@ -4,7 +4,7 @@ An AI-powered hedge fund simulator that uses multiple AI agents to paper trade i
 
 ## Project Overview
 
-This project simulates a hedge fund with 8 different AI "analysts" who provide investment recommendations based on their unique strategies and expertise. The fund manager (Bill Ackman) evaluates these recommendations and decides which trades to execute in a paper trading environment.
+This project simulates a hedge fund with 8 different AI "analysts" who provide investment recommendations based on their unique strategies and expertise. The fund manager evaluates these recommendations and decides which trades to execute in a paper trading environment.
 
 ### AI Analysts
 
