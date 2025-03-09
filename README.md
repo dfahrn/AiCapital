@@ -18,7 +18,7 @@ The system includes 8 different AI analysts, each with unique specialties:
 7. **Risk Manager** - Specializes in identifying and mitigating investment risks
 8. **Momentum Trader** - Follows market momentum and trends
 
-### Fund Manager (Bill Ackman)
+### Fund Manager
 
 The virtual fund manager reviews all recommendations from the AI analysts and makes the final decisions on which trades to execute, taking into account:
 - Risk-reward profiles
