@@ -1,5 +1,5 @@
 """
-Fund manager agent (Bill Ackman) who evaluates recommendations from analysts.
+Fund manager agent who evaluates recommendations from analysts.
 """
 import json
 import logging
@@ -23,7 +23,7 @@ openai.api_key = OPENAI_API_KEY
 
 
 class FundManager:
-    """Fund manager AI agent (Bill Ackman)."""
+    """Fund manager AI agent."""
     
     def __init__(
         self,
