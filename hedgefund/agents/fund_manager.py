@@ -5,21 +5,18 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-import openai
 from sqlalchemy.orm import Session
 
-from hedgefund.config import OPENAI_API_KEY, FUND_MANAGER
+from hedgefund.config import FUND_MANAGER
 from hedgefund.models import (
     Recommendation, ManagerDecision, Order, OrderSideEnum, 
     OrderTypeEnum, OrderStatusEnum
 )
 from hedgefund.data import MarketData
+from hedgefund.utils.llm_client import chat_json
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Configure OpenAI
-openai.api_key = OPENAI_API_KEY
 
 
 class FundManager:
@@ -39,7 +36,7 @@ class FundManager:
         
         Args:
             name: The name of the fund manager.
-            model: The OpenAI model to use.
+            model: The LLM model to use.
             temperature: The temperature for the AI response.
             style: The investment style of the fund manager.
             db: Optional database session.
@@ -158,21 +155,14 @@ Consider the analyst's expertise, the strength of the reasoning, risk-reward, an
         system_prompt = self._format_system_prompt()
         user_prompt = self._get_user_prompt(recommendation, analyst_info, portfolio_info)
         
-        # Get evaluation from OpenAI
+        # Get evaluation from the configured LLM provider
         try:
-            response = openai.chat.completions.create(
+            decision_data = chat_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"}
+                temperature=self.temperature
             )
-            
-            # Parse the response
-            decision_text = response.choices[0].message.content
-            decision_data = json.loads(decision_text)
             
             # Save to database if available
             if self.db and 'recommendation_id' in recommendation:
@@ -181,7 +171,7 @@ Consider the analyst's expertise, the strength of the reasoning, risk-reward, an
             return decision_data
             
         except Exception as e:
-            logger.error(f"Error getting evaluation from OpenAI: {e}")
+            logger.error(f"Error getting evaluation from the LLM: {e}")
             raise
     
     def _save_decision(self, recommendation_id: int, decision_data: Dict[str, Any]) -> Optional[ManagerDecision]:

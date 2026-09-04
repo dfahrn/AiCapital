@@ -1,18 +1,29 @@
 # AI Hedge Fund Dependencies
 
-# OpenAI for AI agents
-openai==1.12.0
+# OpenAI-compatible client, used for every LLM provider
+# (Gemini, Groq, OpenRouter, Ollama, OpenAI - see .env.template)
+openai>=1.55.0        # <1.55 passes proxies= to httpx, broken by httpx>=0.28
 
 # Data handling
 pandas==2.1.1
 numpy==1.26.0
 
 # Market data
-yfinance==0.2.31
+yfinance>=1.0         # older versions fail against Yahoo's current API
 alpha_vantage==2.3.1
 
 # Paper trading
+# NOTE: alpaca-trade-api 3.0.2 hard-pins PyYAML==6.0, which cannot build on
+# Python 3.12. Install it without deps and supply them separately:
+#   pip install "PyYAML>=6.0.1" "websockets>=13" "websocket-client>=0.56.0,<2" msgpack deprecation
+#   pip install --no-deps alpaca-trade-api==3.0.2
+#
+# Its websockets<11 pin also conflicts with yfinance (needs >=13). Only Alpaca's
+# streaming API uses websockets and this project uses the REST client only, so
+# the newer version is safe here.
 alpaca-trade-api==3.0.2
+PyYAML>=6.0.1
+websockets>=13
 
 # Database
 sqlalchemy==2.0.23
@@ -23,8 +34,10 @@ matplotlib==3.8.0
 seaborn==0.13.0
 plotly==5.18.0
 dash==2.14.1
+dash-bootstrap-components>=1.5.0
 
 # Utilities
 python-dotenv==1.0.0
 requests==2.31.0
-schedule==1.2.1 
+schedule==1.2.1
+pytz>=2023.3 

@@ -86,7 +86,12 @@ class MarketData:
         try:
             ticker = yf.Ticker(symbol)
             data = ticker.history(period=period, interval=interval)
-            
+
+            # Yahoo appends a placeholder row for the in-progress session whose
+            # OHLC values are NaN. Drop it so callers taking the last row do not
+            # read NaN prices.
+            data = data.dropna(subset=["Close"])
+
             if data.empty:
                 raise ValueError(f"No historical data found for symbol {symbol}")
                 

@@ -5,18 +5,15 @@ import logging
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
 
-import openai
 from sqlalchemy.orm import Session
 
-from hedgefund.config import OPENAI_API_KEY
+from hedgefund.config import LLM_MODEL
 from hedgefund.models import Analyst, Recommendation, TimeframeEnum, OrderSideEnum
 from hedgefund.data import MarketData
+from hedgefund.utils.llm_client import chat_json
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Configure OpenAI
-openai.api_key = OPENAI_API_KEY
 
 
 class BaseAnalyst(ABC):
@@ -27,7 +24,7 @@ class BaseAnalyst(ABC):
         name: str,
         specialty: str,
         timeframe: str,
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.7,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -39,7 +36,7 @@ class BaseAnalyst(ABC):
             name: The name of the analyst.
             specialty: The analyst's area of expertise.
             timeframe: The analyst's preferred investment timeframe.
-            model: The OpenAI model to use.
+            model: The LLM model to use.
             temperature: The temperature for the AI response (creativity level).
             db: Optional database session.
             market_data: Optional market data service.
@@ -168,22 +165,14 @@ Recent News Headlines:
         system_prompt = self._format_system_prompt()
         user_prompt = self._get_user_prompt(symbol, context)
         
-        # Get recommendation from OpenAI
+        # Get recommendation from the configured LLM provider
         try:
-            response = openai.chat.completions.create(
+            recommendation_data = chat_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"}
+                temperature=self.temperature
             )
-            
-            # Parse the response
-            recommendation_text = response.choices[0].message.content
-            import json
-            recommendation_data = json.loads(recommendation_text)
             
             # Save to database if available
             if self.db:
@@ -192,7 +181,7 @@ Recent News Headlines:
             return recommendation_data
             
         except Exception as e:
-            logger.error(f"Error getting recommendation from OpenAI: {e}")
+            logger.error(f"Error getting recommendation from the LLM: {e}")
             raise
     
     def _gather_stock_data(self, symbol: str) -> Dict[str, Any]:

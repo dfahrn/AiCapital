@@ -5,18 +5,15 @@ import logging
 import random
 from typing import Dict, Any, List, Optional
 
-import openai
 from sqlalchemy.orm import Session
 
-from hedgefund.config import OPENAI_API_KEY
+from hedgefund.config import LLM_MODEL, SYMBOLS_PER_ANALYST
 from hedgefund.data import MarketData
+from hedgefund.utils.llm_client import chat_text
 from .base_analyst import BaseAnalyst
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Configure OpenAI
-openai.api_key = OPENAI_API_KEY
 
 
 class ValueInvestor(BaseAnalyst):
@@ -27,7 +24,7 @@ class ValueInvestor(BaseAnalyst):
         name: str = "Value Investor",
         specialty: str = "Finding undervalued companies with strong fundamentals",
         timeframe: str = "LONG_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.7,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -44,7 +41,7 @@ class ValueInvestor(BaseAnalyst):
         # Start with a list of common value stocks to analyze
         value_stocks = ["BRK-B", "JPM", "JNJ", "PG", "KO", "CVX", "VZ", "IBM", "INTC", "WMT", "CVS", "MRK", "PFE", "BAC", "C"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a value investor looking for undervalued companies with strong fundamentals.
 Your job is to suggest 5 stock tickers (symbols only) that might be undervalued in the current market.
@@ -58,27 +55,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 potentially undervalued stocks to analyze based on current market conditions."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(value_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(value_stocks, min(5, len(value_stocks)))
+            return random.sample(value_stocks, min(SYMBOLS_PER_ANALYST, len(value_stocks)))
 
 
 class GrowthHunter(BaseAnalyst):
@@ -89,7 +84,7 @@ class GrowthHunter(BaseAnalyst):
         name: str = "Growth Hunter",
         specialty: str = "Identifying high-growth potential companies",
         timeframe: str = "MEDIUM_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.8,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -106,7 +101,7 @@ class GrowthHunter(BaseAnalyst):
         # Start with a list of common growth stocks to analyze
         growth_stocks = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "CRM", "AMD", "ADBE", "SHOP", "SNOW", "NET", "CRWD", "ENPH"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a growth-focused investor looking for companies with high growth potential.
 Your job is to suggest 5 stock tickers (symbols only) that might have strong growth prospects in the current market.
@@ -120,27 +115,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 potential high-growth stocks to analyze based on current market conditions."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(growth_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(growth_stocks, min(5, len(growth_stocks)))
+            return random.sample(growth_stocks, min(SYMBOLS_PER_ANALYST, len(growth_stocks)))
 
 
 class TechnicalAnalyst(BaseAnalyst):
@@ -151,7 +144,7 @@ class TechnicalAnalyst(BaseAnalyst):
         name: str = "Technical Analyst",
         specialty: str = "Analyzing price charts and technical indicators",
         timeframe: str = "SHORT_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.6,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -168,7 +161,7 @@ class TechnicalAnalyst(BaseAnalyst):
         # Start with major indices and liquid stocks good for technical analysis
         technical_stocks = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "AMD", "NVDA", "BA", "DIS", "JPM", "GS"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a technical analyst focusing on chart patterns and indicators.
 Your job is to suggest 5 stock tickers (symbols only) that might have interesting technical setups in the current market.
@@ -182,27 +175,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 stocks that might have interesting technical setups to analyze in the current market."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(technical_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(technical_stocks, min(5, len(technical_stocks)))
+            return random.sample(technical_stocks, min(SYMBOLS_PER_ANALYST, len(technical_stocks)))
 
 
 class SentimentAnalyzer(BaseAnalyst):
@@ -213,7 +204,7 @@ class SentimentAnalyzer(BaseAnalyst):
         name: str = "Sentiment Analyzer",
         specialty: str = "Monitoring news, social media, and market sentiment",
         timeframe: str = "SHORT_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.8,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -251,27 +242,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
             
             user_prompt = f"{news_text}\n\nBased on this news, suggest 5 stocks that might be affected by current sentiment and news flow."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(news_driven_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(news_driven_stocks, min(5, len(news_driven_stocks)))
+            return random.sample(news_driven_stocks, min(SYMBOLS_PER_ANALYST, len(news_driven_stocks)))
 
 
 class SectorSpecialist(BaseAnalyst):
@@ -282,7 +271,7 @@ class SectorSpecialist(BaseAnalyst):
         name: str = "Sector Specialist",
         specialty: str = "Focusing on specific industry sectors",
         timeframe: str = "MEDIUM_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.7,
         sector: str = "Technology",
         db: Optional[Session] = None,
@@ -311,7 +300,7 @@ class SectorSpecialist(BaseAnalyst):
         # Get stocks for the chosen sector, default to Technology
         base_stocks = sector_stocks.get(self.sector, sector_stocks["Technology"])
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a sector specialist focusing on the {self.sector} sector.
 Your job is to suggest 5 stock tickers (symbols only) within the {self.sector} sector that might be good investment opportunities.
@@ -324,27 +313,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = f"Suggest 5 promising stocks within the {self.sector} sector based on current market and sector conditions."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(base_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(base_stocks, min(5, len(base_stocks)))
+            return random.sample(base_stocks, min(SYMBOLS_PER_ANALYST, len(base_stocks)))
 
 
 class MacroEconomist(BaseAnalyst):
@@ -355,7 +342,7 @@ class MacroEconomist(BaseAnalyst):
         name: str = "Macro Economist",
         specialty: str = "Analyzing broader economic trends",
         timeframe: str = "LONG_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.6,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -372,7 +359,7 @@ class MacroEconomist(BaseAnalyst):
         # Start with ETFs and stocks sensitive to macro trends
         macro_stocks = ["SPY", "QQQ", "DIA", "IWM", "GLD", "SLV", "USO", "TLT", "XLF", "XLE", "XLI", "XLK", "XLV", "XLP", "XLRE"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a macro-economic analyst focusing on broad economic trends.
 Your job is to suggest 5 stock or ETF tickers (symbols only) that might benefit from current macroeconomic conditions.
@@ -386,27 +373,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 stocks or ETFs that might perform well given current macroeconomic conditions and trends."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(macro_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(macro_stocks, min(5, len(macro_stocks)))
+            return random.sample(macro_stocks, min(SYMBOLS_PER_ANALYST, len(macro_stocks)))
 
 
 class RiskManager(BaseAnalyst):
@@ -417,7 +402,7 @@ class RiskManager(BaseAnalyst):
         name: str = "Risk Manager",
         specialty: str = "Identifying and mitigating investment risks",
         timeframe: str = "MEDIUM_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.5,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -434,7 +419,7 @@ class RiskManager(BaseAnalyst):
         # Focus on blue chips, defensive stocks, and volatility indicators
         risk_stocks = ["VIX", "TLT", "GLD", "MCD", "JNJ", "PG", "KO", "XLP", "XLU", "USMV", "SPLV", "SH", "PSQ", "JPST", "MINT"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a risk-focused analyst prioritizing downside protection.
 Your job is to suggest 5 stock or ETF tickers (symbols only) to analyze from a risk management perspective.
@@ -448,27 +433,25 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 stocks or ETFs to analyze from a risk management perspective in the current market."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(risk_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(risk_stocks, min(5, len(risk_stocks)))
+            return random.sample(risk_stocks, min(SYMBOLS_PER_ANALYST, len(risk_stocks)))
 
 
 class MomentumTrader(BaseAnalyst):
@@ -479,7 +462,7 @@ class MomentumTrader(BaseAnalyst):
         name: str = "Momentum Trader",
         specialty: str = "Following market momentum and trends",
         timeframe: str = "SHORT_TERM",
-        model: str = "gpt-4-turbo",
+        model: str = LLM_MODEL,
         temperature: float = 0.8,
         db: Optional[Session] = None,
         market_data: Optional[MarketData] = None
@@ -496,7 +479,7 @@ class MomentumTrader(BaseAnalyst):
         # Start with stocks that often exhibit momentum
         momentum_stocks = ["TSLA", "NVDA", "AMD", "SHOP", "PLTR", "SNOW", "NET", "DKNG", "RBLX", "MSTR", "UPST", "CRWD", "RIVN", "SNAP", "SOFI"]
         
-        # Get additional ideas using OpenAI
+        # Get additional ideas from the LLM
         try:
             system_prompt = f"""You are {self.name}, a momentum-focused trader looking for stocks with strong directional trends.
 Your job is to suggest 5 stock tickers (symbols only) that might currently have strong momentum or are setting up for momentum trades.
@@ -510,24 +493,22 @@ Return just the tickers as a comma-separated list, with no additional text."""
 
             user_prompt = "Suggest 5 stocks that might currently have strong momentum or are setting up for momentum trades."
             
-            response = openai.chat.completions.create(
+            response_text = chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                temperature=self.temperature
             )
             
             # Parse the response
-            ai_suggestions = response.choices[0].message.content.strip().split(',')
+            ai_suggestions = response_text.strip().split(',')
             ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(momentum_stocks + ai_suggestions))
-            return random.sample(all_ideas, min(5, len(all_ideas)))
+            return random.sample(all_ideas, min(SYMBOLS_PER_ANALYST, len(all_ideas)))
             
         except Exception as e:
             logger.error(f"Error getting investment ideas: {e}")
             # Fallback to predefined list
-            return random.sample(momentum_stocks, min(5, len(momentum_stocks))) 
+            return random.sample(momentum_stocks, min(SYMBOLS_PER_ANALYST, len(momentum_stocks))) 
