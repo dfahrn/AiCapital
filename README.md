@@ -150,11 +150,16 @@ python check_llm.py AAPL     # plus one real analyst run, no Alpaca needed
 python main.py --initialize-db --run-once --force-run
 ```
 
-Then for continuous operation:
+Drop `--initialize-db` after the first run, and `--force-run` to respect real
+market hours. Then for continuous operation:
 
 ```bash
 python main.py
 ```
+
+Orders go to your Alpaca paper account, so Alpaca's own dashboard shows the
+live portfolio. The bundled dashboard is off by default; add `--dashboard`
+(or `--dashboard-only`) if you want it on http://localhost:8050.
 
 ## Features
 

@@ -28,9 +28,16 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Also start the local dashboard (Alpaca's own dashboard shows "
+             "the live account, so this is off by default)"
+    )
+
+    parser.add_argument(
         "--no-dashboard",
         action="store_true",
-        help="Don't start the dashboard"
+        help=argparse.SUPPRESS  # Kept so existing commands keep working.
     )
     
     parser.add_argument(
@@ -104,7 +111,7 @@ def main():
         
         # Start dashboard in separate thread if requested
         dashboard_thread = None
-        if not args.no_dashboard:
+        if args.dashboard:
             logger.info("Starting dashboard")
             dashboard_thread = threading.Thread(target=run_dashboard_thread)
             dashboard_thread.daemon = True
