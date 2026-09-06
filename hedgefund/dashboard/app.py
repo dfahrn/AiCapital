@@ -511,7 +511,8 @@ def run_dashboard(host: str = DASHBOARD_HOST, port: int = DASHBOARD_PORT, debug:
         port: The port to run on.
         debug: Whether to run in debug mode.
     """
-    app.run_server(host=host, port=port, debug=debug)
+    # Dash 3 removed run_server in favour of run.
+    app.run(host=host, port=port, debug=debug)
 
 
 if __name__ == "__main__":

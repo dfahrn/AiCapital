@@ -33,7 +33,7 @@ alembic==1.12.1
 matplotlib==3.8.0
 seaborn==0.13.0
 plotly==5.18.0
-dash==2.14.1
+dash>=3.0            # 3.x replaced app.run_server with app.run
 dash-bootstrap-components>=1.5.0
 
 # Utilities
