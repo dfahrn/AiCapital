@@ -203,6 +203,13 @@ class Orchestrator:
             A list of trade execution results.
         """
         try:
+            # Orders submitted on an earlier cycle may have filled since (a
+            # market order placed while the market was closed queues until the
+            # open), so settle those before placing anything new.
+            reconciled = self.paper_trader.reconcile_orders()
+            if reconciled:
+                logger.info(f"Reconciled {len(reconciled)} previously submitted orders")
+
             # Process pending orders
             results = self.paper_trader.process_pending_orders()
             

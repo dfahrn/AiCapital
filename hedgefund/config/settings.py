@@ -41,10 +41,17 @@ LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 LLM_JSON_MODE = os.getenv("LLM_JSON_MODE", "true").lower() not in ("false", "0", "no")
 
 # Retries for transient failures (rate limits are common on free tiers).
-LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "5"))
+
+# Longest per-attempt wait we will honour when a provider asks us to back off.
+# Beyond this the "retry" is really a stall on a quota window: a run once sat
+# for 24 hours taking 10-minute naps against a daily cap. Fail the call instead.
+LLM_MAX_RETRY_DELAY = float(os.getenv("LLM_MAX_RETRY_DELAY", "60"))
 
 # Seconds to pause between agent calls, to stay under free-tier rate limits.
-LLM_REQUEST_DELAY = float(os.getenv("LLM_REQUEST_DELAY", "0"))
+# Groq's free tier caps tokens per minute (8000), not requests. Each stock
+# analysis costs roughly 1500 tokens, so ~5 calls/minute is the safe ceiling.
+LLM_REQUEST_DELAY = float(os.getenv("LLM_REQUEST_DELAY", "12"))
 
 # Symbols each analyst researches per cycle. This is the main driver of how many
 # LLM calls a full cycle makes: 8 analysts x (1 idea call + this many analyses).

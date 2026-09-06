@@ -52,8 +52,10 @@ class PaperTrader:
             base_url=ALPACA_BASE_URL
         )
         
-        # Initialize portfolio
+        # Initialize portfolio. These are replaced by the live Alpaca account
+        # as soon as it can be read; initial_capital is only a fallback.
         self.cash = initial_capital
+        self.buying_power = initial_capital
         self.positions = {}  # symbol -> Position object
         
         # Load portfolio from database if available
@@ -61,7 +63,19 @@ class PaperTrader:
             self._load_portfolio()
     
     def _load_portfolio(self):
-        """Load the portfolio state from the database."""
+        """
+        Load the portfolio state.
+
+        Alpaca is the book of record, so prefer the live account and fall back
+        to the local mirror only if the broker cannot be reached.
+        """
+        if self.sync_from_alpaca():
+            return
+
+        logger.warning(
+            "Falling back to the local portfolio mirror; it may be stale. "
+            "Check ALPACA_API_KEY and ALPACA_SECRET_KEY."
+        )
         try:
             # Get the cash balance from the latest portfolio snapshot
             latest_snapshot = (
@@ -173,188 +187,286 @@ class PaperTrader:
                 logger.error(f"Error committing position updates to database: {e}")
                 self.db.rollback()
     
-    def execute_order(self, order: Union[Order, Dict[str, Any]]) -> Dict[str, Any]:
+    def sync_from_alpaca(self) -> bool:
         """
-        Execute a paper trade order.
-        
-        Args:
-            order: The order to execute (either an Order object or a dictionary).
-            
-        Returns:
-            A dictionary with the execution results.
+        Refresh cash and positions from the Alpaca account.
+
+        Alpaca is the book of record once orders are submitted there, so the
+        local tables are a mirror for the dashboard rather than a ledger of
+        their own. Returns False if the account could not be read, in which
+        case the caller should not trade on stale local numbers.
         """
         try:
-            # Convert dictionary to Order-like object if needed
+            account = self.alpaca.get_account()
+            alpaca_positions = self.alpaca.list_positions()
+        except Exception as e:
+            logger.error(f"Could not read the Alpaca account: {e}")
+            return False
+
+        self.cash = float(account.cash)
+        self.buying_power = float(account.buying_power)
+
+        # Rebuild local positions to match the broker exactly, so a position
+        # closed at Alpaca cannot linger here.
+        self.positions = {}
+        for p in alpaca_positions:
+            quantity = int(float(p.qty))
+            avg_price = float(p.avg_entry_price)
+            current_price = float(p.current_price or avg_price)
+
+            self.positions[p.symbol] = Position(
+                symbol=p.symbol,
+                quantity=quantity,
+                avg_entry_price=avg_price,
+                current_price=current_price,
+                market_value=float(p.market_value or quantity * current_price),
+                cost_basis=float(p.cost_basis or quantity * avg_price),
+                unrealized_pl=float(p.unrealized_pl or 0.0),
+                unrealized_pl_percent=float(p.unrealized_plpc or 0.0) * 100,
+                updated_at=datetime.now()
+            )
+
+        if self.db:
+            try:
+                # Replace the mirror wholesale; stale rows would otherwise show
+                # positions the account no longer holds.
+                self.db.query(Position).delete()
+                for position in self.positions.values():
+                    self.db.add(position)
+                self.db.commit()
+            except Exception as e:
+                logger.error(f"Error mirroring Alpaca positions to the database: {e}")
+                self.db.rollback()
+
+        logger.info(
+            f"Synced from Alpaca: {len(self.positions)} positions, "
+            f"${self.cash:,.2f} cash, ${self.buying_power:,.2f} buying power"
+        )
+        return True
+
+    def reconcile_orders(self) -> List[Dict[str, Any]]:
+        """
+        Bring previously submitted orders up to date with the broker.
+
+        Market orders placed outside trading hours queue until the open, so a
+        submitted order is checked on later cycles rather than assumed filled.
+        """
+        if not self.db:
+            return []
+
+        pending = (
+            self.db.query(Order)
+            .filter(Order.status == OrderStatusEnum.SUBMITTED)
+            .filter(Order.external_id.isnot(None))
+            .all()
+        )
+
+        if not pending:
+            return []
+
+        # Alpaca's vocabulary for where an order ended up.
+        terminal = {
+            "filled": OrderStatusEnum.FILLED,
+            "partially_filled": OrderStatusEnum.PARTIALLY_FILLED,
+            "canceled": OrderStatusEnum.CANCELED,
+            "cancelled": OrderStatusEnum.CANCELED,
+            "expired": OrderStatusEnum.EXPIRED,
+            "rejected": OrderStatusEnum.REJECTED,
+            "done_for_day": OrderStatusEnum.EXPIRED,
+        }
+
+        results = []
+        for order in pending:
+            try:
+                broker_order = self.alpaca.get_order(order.external_id)
+            except Exception as e:
+                logger.error(f"Could not read Alpaca order {order.external_id}: {e}")
+                continue
+
+            state = (broker_order.status or "").lower()
+            if state not in terminal:
+                continue  # Still working; check again next cycle.
+
+            order.status = terminal[state]
+            order.filled_quantity = int(float(broker_order.filled_qty or 0))
+            if broker_order.filled_avg_price:
+                order.filled_avg_price = float(broker_order.filled_avg_price)
+            order.updated_at = datetime.now()
+
+            logger.info(
+                f"Order {order.external_id} for {order.symbol} is now "
+                f"{order.status.value} ({order.filled_quantity}/{order.quantity} filled)"
+            )
+            results.append({
+                "symbol": order.symbol,
+                "status": order.status.value,
+                "filled_quantity": order.filled_quantity,
+                "filled_avg_price": order.filled_avg_price,
+            })
+
+        try:
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"Error saving reconciled orders: {e}")
+            self.db.rollback()
+
+        # Fills move cash and positions, so refresh the mirror.
+        if results:
+            self.sync_from_alpaca()
+
+        return results
+
+    def execute_order(self, order: Union[Order, Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Submit an order to Alpaca's paper trading account.
+
+        The order is sent and recorded as SUBMITTED; it is not treated as
+        filled here, because a market order placed while the market is closed
+        queues until the open. reconcile_orders() picks up the outcome later.
+
+        Args:
+            order: The order to execute (either an Order object or a dictionary).
+
+        Returns:
+            A dictionary with the submission result.
+        """
+        symbol = getattr(order, "symbol", None) or (
+            order.get("symbol") if isinstance(order, dict) else None
+        )
+
+        try:
             if isinstance(order, dict):
                 class DictOrder:
                     pass
-                
+
                 dict_order = DictOrder()
                 for key, value in order.items():
                     setattr(dict_order, key, value)
                 order = dict_order
-            
-            # Get order details
+
             symbol = order.symbol
-            side = order.side.value if hasattr(order.side, 'value') else order.side
-            quantity = order.quantity
-            
-            # Get current price
+            side = order.side.value if hasattr(order.side, "value") else str(order.side)
+            side = side.lower()
+            quantity = int(order.quantity)
+
+            if quantity <= 0:
+                return self._reject(order, symbol, side, quantity,
+                                    "Order quantity must be positive")
+
+            # Refuse to trade on numbers we could not verify with the broker.
+            if not self.sync_from_alpaca():
+                return self._reject(
+                    order, symbol, side, quantity,
+                    "Could not reach Alpaca to verify the account before trading"
+                )
+
             current_price = self.market_data.get_current_price(symbol)
-            
-            # Check if we can afford the trade
-            if side.lower() == 'buy':
-                cost = current_price * quantity
-                if cost > self.cash:
-                    return {
-                        'success': False,
-                        'message': f"Insufficient cash: ${self.cash:,.2f} available, ${cost:,.2f} required",
-                        'symbol': symbol,
-                        'side': side,
-                        'quantity': quantity,
-                        'price': current_price
-                    }
-            
-            # Check position size limit
-            portfolio_value = self.cash + sum(p.market_value for p in self.positions.values())
-            trade_value = current_price * quantity
-            trade_percent = trade_value / portfolio_value if portfolio_value > 0 else 0
-            
-            if side.lower() == 'buy' and trade_percent > self.max_position_size:
-                return {
-                    'success': False,
-                    'message': f"Trade exceeds max position size ({trade_percent:.2%} > {self.max_position_size:.2%})",
-                    'symbol': symbol,
-                    'side': side,
-                    'quantity': quantity,
-                    'price': current_price
-                }
-            
-            # Execute the trade
-            if side.lower() == 'buy':
-                # Deduct cash
-                self.cash -= current_price * quantity
-                
-                # Update position
-                if symbol in self.positions:
-                    # Add to existing position
-                    position = self.positions[symbol]
-                    
-                    # Calculate new average price
-                    total_quantity = position.quantity + quantity
-                    new_cost = (position.avg_entry_price * position.quantity) + (current_price * quantity)
-                    new_avg_price = new_cost / total_quantity
-                    
-                    # Update position
-                    position.quantity = total_quantity
-                    position.avg_entry_price = new_avg_price
-                    position.cost_basis = new_cost
-                    position.current_price = current_price
-                    position.market_value = total_quantity * current_price
-                    position.unrealized_pl = position.market_value - position.cost_basis
-                    position.unrealized_pl_percent = (position.unrealized_pl / position.cost_basis) * 100 if position.cost_basis > 0 else 0
-                    position.updated_at = datetime.now()
-                else:
-                    # Create new position
-                    position = Position(
-                        symbol=symbol,
-                        quantity=quantity,
-                        avg_entry_price=current_price,
-                        current_price=current_price,
-                        market_value=quantity * current_price,
-                        cost_basis=quantity * current_price,
-                        unrealized_pl=0.0,
-                        unrealized_pl_percent=0.0
+
+            if side == "buy":
+                # The fund's own risk rule, checked against the real account.
+                portfolio_value = self.cash + sum(
+                    p.market_value for p in self.positions.values()
+                )
+                trade_value = current_price * quantity
+                trade_percent = trade_value / portfolio_value if portfolio_value > 0 else 0
+
+                if trade_percent > self.max_position_size:
+                    return self._reject(
+                        order, symbol, side, quantity,
+                        f"Trade exceeds max position size "
+                        f"({trade_percent:.2%} > {self.max_position_size:.2%})"
                     )
-                    self.positions[symbol] = position
-            
-            elif side.lower() == 'sell':
-                # Check if we have the position
-                if symbol not in self.positions:
-                    return {
-                        'success': False,
-                        'message': f"Cannot sell {symbol}: position does not exist",
-                        'symbol': symbol,
-                        'side': side,
-                        'quantity': quantity,
-                        'price': current_price
-                    }
-                
-                position = self.positions[symbol]
-                
-                # Check if we have enough shares
-                if position.quantity < quantity:
-                    return {
-                        'success': False,
-                        'message': f"Cannot sell {quantity} shares of {symbol}: only {position.quantity} owned",
-                        'symbol': symbol,
-                        'side': side,
-                        'quantity': quantity,
-                        'price': current_price
-                    }
-                
-                # Calculate profit/loss
-                trade_pl = (current_price - position.avg_entry_price) * quantity
-                
-                # Add cash
-                self.cash += current_price * quantity
-                
-                # Update position
-                if position.quantity == quantity:
-                    # Close position
-                    del self.positions[symbol]
-                else:
-                    # Reduce position
-                    position.quantity -= quantity
-                    position.market_value = position.quantity * current_price
-                    position.cost_basis = position.quantity * position.avg_entry_price
-                    position.unrealized_pl = position.market_value - position.cost_basis
-                    position.unrealized_pl_percent = (position.unrealized_pl / position.cost_basis) * 100 if position.cost_basis > 0 else 0
-                    position.updated_at = datetime.now()
-            
-            # Save to database if available
-            if self.db:
-                try:
-                    # Update order status
-                    if hasattr(order, 'id'):
-                        db_order = self.db.query(Order).filter_by(id=order.id).first()
-                        if db_order:
-                            db_order.status = OrderStatusEnum.FILLED
-                            db_order.filled_quantity = quantity
-                            db_order.filled_avg_price = current_price
-                            db_order.updated_at = datetime.now()
-                    
-                    # Save position changes
-                    if symbol in self.positions:
-                        self.db.add(self.positions[symbol])
-                    
+
+                if trade_value > getattr(self, "buying_power", self.cash):
+                    return self._reject(
+                        order, symbol, side, quantity,
+                        f"Insufficient buying power: "
+                        f"${getattr(self, 'buying_power', self.cash):,.2f} available, "
+                        f"${trade_value:,.2f} required"
+                    )
+
+            elif side == "sell":
+                held = self.positions.get(symbol)
+                if not held:
+                    return self._reject(order, symbol, side, quantity,
+                                        f"Cannot sell {symbol}: no position at Alpaca")
+                if held.quantity < quantity:
+                    return self._reject(
+                        order, symbol, side, quantity,
+                        f"Cannot sell {quantity} shares of {symbol}: "
+                        f"only {held.quantity} held"
+                    )
+
+            # Send it to the broker.
+            submitted = self.alpaca.submit_order(
+                symbol=symbol,
+                qty=quantity,
+                side=side,
+                type="market",
+                time_in_force="day"
+            )
+
+            if self.db and hasattr(order, "id"):
+                db_order = self.db.query(Order).filter_by(id=order.id).first()
+                if db_order:
+                    db_order.external_id = submitted.id
+                    db_order.status = OrderStatusEnum.SUBMITTED
+                    db_order.updated_at = datetime.now()
                     self.db.commit()
-                    
-                except Exception as e:
-                    logger.error(f"Error saving trade to database: {e}")
-                    self.db.rollback()
-            
+
+            logger.info(
+                f"Submitted {side} {quantity} {symbol} to Alpaca "
+                f"(order {submitted.id}, status {submitted.status})"
+            )
+
             return {
-                'success': True,
-                'message': f"Executed {side} {quantity} shares of {symbol} at ${current_price:,.2f}",
-                'symbol': symbol,
-                'side': side,
-                'quantity': quantity,
-                'price': current_price,
-                'value': quantity * current_price,
-                'timestamp': datetime.now().isoformat()
+                "success": True,
+                "message": f"Submitted {side} {quantity} shares of {symbol} to Alpaca",
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": current_price,
+                "value": quantity * current_price,
+                "external_id": submitted.id,
+                "broker_status": submitted.status,
+                "timestamp": datetime.now().isoformat()
             }
-            
+
         except Exception as e:
-            logger.error(f"Error executing order: {e}")
-            return {
-                'success': False,
-                'message': f"Error executing order: {str(e)}",
-                'symbol': getattr(order, 'symbol', 'unknown'),
-                'side': getattr(order, 'side', 'unknown'),
-                'quantity': getattr(order, 'quantity', 0)
-            }
-    
+            # A broker rejection is a real outcome, not a reason to pretend the
+            # trade happened: no position is invented that Alpaca does not know.
+            logger.error(f"Error submitting order for {symbol}: {e}")
+            return self._reject(
+                order, symbol,
+                getattr(order, "side", "unknown"),
+                getattr(order, "quantity", 0),
+                f"Alpaca rejected or was unreachable: {e}"
+            )
+
+    def _reject(self, order, symbol, side, quantity, reason: str) -> Dict[str, Any]:
+        """Mark an order rejected and return the failure result."""
+        logger.warning(f"Order rejected for {symbol}: {reason}")
+
+        if self.db and hasattr(order, "id"):
+            try:
+                db_order = self.db.query(Order).filter_by(id=order.id).first()
+                if db_order:
+                    db_order.status = OrderStatusEnum.REJECTED
+                    db_order.updated_at = datetime.now()
+                    self.db.commit()
+            except Exception as e:
+                logger.error(f"Error recording rejection: {e}")
+                self.db.rollback()
+
+        side = side.value if hasattr(side, "value") else side
+        return {
+            "success": False,
+            "message": reason,
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity
+        }
+
     def process_pending_orders(self) -> List[Dict[str, Any]]:
         """
         Process all pending orders in the database.

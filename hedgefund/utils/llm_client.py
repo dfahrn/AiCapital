@@ -10,13 +10,13 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
 from hedgefund.config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_JSON_MODE,
-    LLM_MAX_RETRIES, LLM_REQUEST_DELAY
+    LLM_MAX_RETRIES, LLM_REQUEST_DELAY, LLM_MAX_RETRY_DELAY
 )
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,9 @@ def chat_json(
         except Exception as e:
             last_error = e
 
-            # A provider that rejects JSON mode should be retried without it.
+            # A provider that rejects JSON mode, or accepts it and then fails to
+            # produce valid JSON, should be retried without it. Checked before
+            # the permanent-error test below, as this arrives as a 400.
             if "response_format" in kwargs and _is_json_mode_error(e):
                 logger.warning(
                     f"{model} rejected JSON mode; retrying with prompt-instructed "
@@ -182,8 +184,20 @@ def chat_json(
                 raise
 
             if attempt < LLM_MAX_RETRIES:
-                # Prefer the provider's own advice over blind exponential backoff.
+                # Prefer the provider's own advice over blind exponential backoff,
+                # but refuse to sit on a multi-minute wait: that is a hang, not a
+                # retry, and it usually means a quota window rather than a blip.
                 backoff = _retry_after_seconds(e) or 2 ** attempt
+
+                if backoff > LLM_MAX_RETRY_DELAY:
+                    logger.error(
+                        f"{model} asked us to wait {backoff:.0f}s, over the "
+                        f"{LLM_MAX_RETRY_DELAY:.0f}s limit. Giving up on this call "
+                        f"rather than stalling. Raise LLM_MAX_RETRY_DELAY to wait "
+                        f"it out, or switch model/provider."
+                    )
+                    raise
+
                 logger.warning(
                     f"LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}. "
                     f"Retrying in {backoff:.0f}s."
@@ -193,6 +207,33 @@ def chat_json(
                 logger.error(f"LLM call failed after {LLM_MAX_RETRIES} attempts: {e}")
 
     raise last_error
+
+
+def parse_tickers(response_text: str) -> List[str]:
+    """
+    Pull stock symbols out of a free-form model reply.
+
+    Models do not always return a clean comma-separated list: they refuse, add
+    a preamble, or wrap the list in prose. Without validation that text becomes
+    a "ticker" and every downstream lookup for it fails, so keep only entries
+    shaped like real symbols (AAPL, BRK-B, BF.A).
+    """
+    candidates = re.split(r"[,\n:]", response_text or "")
+    tickers, seen = [], set()
+
+    for candidate in candidates:
+        symbol = candidate.strip().strip(".\"'`*-").upper()
+
+        if not re.fullmatch(r"[A-Z]{1,5}([-.][A-Z]{1,2})?", symbol):
+            if symbol:
+                logger.debug(f"Discarding non-ticker text from model reply: {symbol!r}")
+            continue
+
+        if symbol not in seen:
+            seen.add(symbol)
+            tickers.append(symbol)
+
+    return tickers
 
 
 def chat_text(
@@ -246,8 +287,20 @@ def chat_text(
                 raise
 
             if attempt < LLM_MAX_RETRIES:
-                # Prefer the provider's own advice over blind exponential backoff.
+                # Prefer the provider's own advice over blind exponential backoff,
+                # but refuse to sit on a multi-minute wait: that is a hang, not a
+                # retry, and it usually means a quota window rather than a blip.
                 backoff = _retry_after_seconds(e) or 2 ** attempt
+
+                if backoff > LLM_MAX_RETRY_DELAY:
+                    logger.error(
+                        f"{model} asked us to wait {backoff:.0f}s, over the "
+                        f"{LLM_MAX_RETRY_DELAY:.0f}s limit. Giving up on this call "
+                        f"rather than stalling. Raise LLM_MAX_RETRY_DELAY to wait "
+                        f"it out, or switch model/provider."
+                    )
+                    raise
+
                 logger.warning(
                     f"LLM call failed (attempt {attempt}/{LLM_MAX_RETRIES}): {e}. "
                     f"Retrying in {backoff:.0f}s."
@@ -260,9 +313,21 @@ def chat_text(
 
 
 def _is_json_mode_error(error: Exception) -> bool:
-    """Whether an error looks like the provider not supporting JSON mode."""
+    """
+    Whether an error means JSON mode did not work, so the prompt-instructed
+    fallback is worth a try.
+
+    Covers both providers that reject response_format outright and those that
+    accept it but fail to produce valid JSON (Groq returns a 400 reading
+    "Failed to generate JSON").
+    """
     message = str(error).lower()
-    return "response_format" in message or "json_object" in message
+    return (
+        "response_format" in message
+        or "json_object" in message
+        or "failed to generate json" in message
+        or "json_validate_failed" in message
+    )
 
 
 def _retry_after_seconds(error: Exception) -> Optional[float]:
@@ -290,12 +355,17 @@ def _retry_after_seconds(error: Exception) -> Optional[float]:
 
 def _is_daily_quota_exhausted(error: Exception) -> bool:
     """
-    Whether a 429 is the per-day quota rather than the per-minute rate limit.
+    Whether a 429 is a per-day cap rather than a per-minute rate limit.
 
-    Waiting does not help until the quota window resets, so we stop instead of
-    grinding through retries that cannot succeed.
+    A daily cap will not clear within any sane retry window, so we stop rather
+    than grind. Providers word this differently: Gemini uses quota ids like
+    "GenerateRequestsPerDayPerProjectPerModel", Groq says "tokens per day (TPD)".
     """
-    return getattr(error, "status_code", None) == 429 and "PerDay" in str(error)
+    if getattr(error, "status_code", None) != 429:
+        return False
+
+    message = str(error).lower()
+    return "perday" in message or "per day" in message or "(tpd)" in message
 
 
 def _is_permanent_error(error: Exception) -> bool:

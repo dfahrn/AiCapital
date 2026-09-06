@@ -235,8 +235,25 @@ Consider the analyst's expertise, the strength of the reasoning, risk-reward, an
             side_str = recommendation.get('action', 'BUY').upper()
             side = OrderSideEnum.BUY if side_str == 'BUY' else OrderSideEnum.SELL
             
-            # Use modified values if provided, otherwise use original recommendation
-            quantity = decision.get('modified_quantity', recommendation.get('quantity', 0))
+            # Use the modified value if the manager set one, otherwise the
+            # analyst's. Note the manager emits "modified_quantity": null when
+            # approving unchanged, so the key is present but empty - a .get()
+            # default would not fire and None would reach a NOT NULL column.
+            quantity = decision.get('modified_quantity')
+            if quantity is None:
+                quantity = recommendation.get('quantity')
+
+            try:
+                quantity = int(quantity)
+            except (TypeError, ValueError):
+                quantity = 0
+
+            if quantity <= 0:
+                logger.warning(
+                    f"Skipping order for {recommendation.get('symbol')}: "
+                    f"no usable quantity in the decision or recommendation."
+                )
+                return None
             
             # Create order
             order = Order(

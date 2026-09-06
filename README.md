@@ -87,8 +87,11 @@ default. Check that against your provider's quota before running one:
 - **Gemini's free tier is 20 requests/day and 5/minute per model**, so a full
   cycle cannot complete there. Set `SYMBOLS_PER_ANALYST=1` (16 calls) and
   `LLM_REQUEST_DELAY=13`, and expect about one cycle per day.
-- **Groq's free tier** is large enough for the default, which is why it is the
-  default here.
+- **Groq's free tier** meters *tokens*, not requests: 8,000 per minute and
+  200,000 per day. A stock analysis costs roughly 2,000 tokens, so a full cycle
+  (48 calls) uses about 100,000 - **two cycles per day**. `LLM_REQUEST_DELAY`
+  defaults to `12` to stay under the per-minute cap, which makes a cycle take
+  about 10 minutes.
 - Gemini's daily quota is **per model**, so switching `LLM_MODEL` gives a fresh
   allowance.
 
@@ -105,17 +108,34 @@ Relevant settings:
   previous request. Raise it if a free tier rate-limits you.
 - `SYMBOLS_PER_ANALYST` — symbols each analyst researches per cycle (default
   `5`). The main lever on how many calls a cycle makes.
-- `LLM_MAX_RETRIES` — retries with exponential backoff on transient errors.
+- `LLM_MAX_RETRIES` — retries on transient errors. The client honours the delay
+  a provider asks for rather than guessing.
+- `LLM_MAX_RETRY_DELAY` — longest wait to honour per attempt (default `60`
+  seconds). A provider that asks for longer is signalling a quota window, not a
+  blip, so the call fails instead of stalling the run.
 
 ### 3. Add Alpaca paper-trading keys
 
-Create a free paper account at [alpaca.markets](https://alpaca.markets), then
-**Home → API Keys → Generate**, and put them in `.env`:
+Orders are submitted to Alpaca, and your Alpaca account - not the local
+database - is the book of record for cash and positions. Valid keys are
+required; without them orders are rejected rather than simulated.
+
+Create a free paper account at [alpaca.markets](https://alpaca.markets), switch
+to **Paper Trading**, then **Home → API Keys → Generate**, and put both in `.env`:
 
 ```
 ALPACA_API_KEY=...
 ALPACA_SECRET_KEY=...
 ```
+
+The secret is shown **once**, at generation. If you lose it, regenerate the pair
+- it cannot be retrieved later, and both values change.
+
+Because market orders queue when the market is closed, an order is recorded as
+`submitted` when it reaches Alpaca and settled to `filled` (or `rejected` /
+`canceled` / `expired`) by the next cycle, which reconciles against the broker
+before placing anything new. `INITIAL_CAPITAL` in the settings is only a
+fallback for display; the real balance comes from your Alpaca account.
 
 ### 4. Verify the model works
 
@@ -138,7 +158,8 @@ python main.py
 
 ## Features
 
-- Real-time paper trading with virtual portfolio
+- Paper trading through a real Alpaca paper account (orders are submitted to
+  Alpaca; your account is the book of record for cash and positions)
 - Multiple AI analysts with different investment strategies
 - AI fund manager to evaluate and approve trades
 - Performance tracking and reporting

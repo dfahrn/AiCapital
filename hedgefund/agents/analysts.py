@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from hedgefund.config import LLM_MODEL, SYMBOLS_PER_ANALYST
 from hedgefund.data import MarketData
-from hedgefund.utils.llm_client import chat_text
+from hedgefund.utils.llm_client import chat_text, parse_tickers
 from .base_analyst import BaseAnalyst
 
 # Configure logging
@@ -63,8 +63,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(value_stocks + ai_suggestions))
@@ -123,8 +122,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(growth_stocks + ai_suggestions))
@@ -183,8 +181,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(technical_stocks + ai_suggestions))
@@ -250,8 +247,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(news_driven_stocks + ai_suggestions))
@@ -321,8 +317,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(base_stocks + ai_suggestions))
@@ -381,8 +376,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(macro_stocks + ai_suggestions))
@@ -441,8 +435,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(risk_stocks + ai_suggestions))
@@ -501,8 +494,7 @@ Return just the tickers as a comma-separated list, with no additional text."""
             )
             
             # Parse the response
-            ai_suggestions = response_text.strip().split(',')
-            ai_suggestions = [s.strip().upper() for s in ai_suggestions if s.strip()]
+            ai_suggestions = parse_tickers(response_text)
             
             # Combine with our predefined list and return a subset
             all_ideas = list(set(momentum_stocks + ai_suggestions))

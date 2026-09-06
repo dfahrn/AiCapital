@@ -33,6 +33,7 @@ class OrderTypeEnum(enum.Enum):
 class OrderStatusEnum(enum.Enum):
     NEW = "new"
     APPROVED = "approved"
+    SUBMITTED = "submitted"  # Sent to the broker, not yet filled
     REJECTED = "rejected"
     FILLED = "filled"
     PARTIALLY_FILLED = "partially_filled"
