@@ -363,27 +363,39 @@ class PaperTrader:
             current_price = self.market_data.get_current_price(symbol)
 
             if side == "buy":
-                # The fund's own risk rule, checked against the real account.
+                # Risk sizing, against the real account. An analyst suggesting
+                # too large a position gets scaled down to what the rules allow
+                # rather than losing the trade: the conviction is the analyst's
+                # to have, the size is the fund's to decide.
                 portfolio_value = self.cash + sum(
                     p.market_value for p in self.positions.values()
                 )
-                trade_value = current_price * quantity
-                trade_percent = trade_value / portfolio_value if portfolio_value > 0 else 0
+                buying_power = getattr(self, "buying_power", self.cash)
 
-                if trade_percent > self.max_position_size:
+                budget = min(portfolio_value * self.max_position_size, buying_power)
+
+                # Room already used by an existing holding counts against the cap.
+                held = self.positions.get(symbol)
+                if held:
+                    budget -= held.market_value
+
+                allowed = int(budget // current_price) if current_price > 0 else 0
+
+                if allowed < 1:
                     return self._reject(
                         order, symbol, side, quantity,
-                        f"Trade exceeds max position size "
-                        f"({trade_percent:.2%} > {self.max_position_size:.2%})"
+                        f"No room for {symbol} within the "
+                        f"{self.max_position_size:.0%} position limit "
+                        f"(${budget:,.2f} available at ${current_price:,.2f}/share)"
                     )
 
-                if trade_value > getattr(self, "buying_power", self.cash):
-                    return self._reject(
-                        order, symbol, side, quantity,
-                        f"Insufficient buying power: "
-                        f"${getattr(self, 'buying_power', self.cash):,.2f} available, "
-                        f"${trade_value:,.2f} required"
+                if quantity > allowed:
+                    logger.info(
+                        f"Sizing {symbol} down from {quantity} to {allowed} shares "
+                        f"to stay within the {self.max_position_size:.0%} limit "
+                        f"and available buying power"
                     )
+                    quantity = allowed
 
             elif side == "sell":
                 held = self.positions.get(symbol)
@@ -410,6 +422,7 @@ class PaperTrader:
                 db_order = self.db.query(Order).filter_by(id=order.id).first()
                 if db_order:
                     db_order.external_id = submitted.id
+                    db_order.quantity = quantity  # May have been sized down.
                     db_order.status = OrderStatusEnum.SUBMITTED
                     db_order.updated_at = datetime.now()
                     self.db.commit()

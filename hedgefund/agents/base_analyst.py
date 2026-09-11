@@ -48,6 +48,12 @@ class BaseAnalyst(ABC):
         self.temperature = temperature
         self.db = db
         self.market_data = market_data or MarketData()
+
+        # Real sizing budget, set by the orchestrator from the live account.
+        # Without it the model guesses round numbers that the risk layer has
+        # to scale down.
+        self.portfolio_value = None
+        self.max_position_value = None
         
         # Create or get analyst record in the database
         if db:
@@ -79,8 +85,17 @@ class BaseAnalyst(ABC):
         Returns:
             The system prompt string.
         """
+        if self.max_position_value:
+            budget = f"""
+
+The fund currently holds ${self.portfolio_value:,.0f}. No single position may
+exceed ${self.max_position_value:,.0f}, so size `quantity` to cost at most that
+much at the current share price. A larger suggestion will be scaled down."""
+        else:
+            budget = ""
+
         return f"""You are {self.name}, an AI financial analyst for a hedge fund, specializing in {self.specialty}. 
-Your job is to analyze stocks and provide investment recommendations.
+Your job is to analyze stocks and provide investment recommendations.{budget}
 
 When making recommendations:
 1. Focus on your specialty: {self.specialty}
@@ -98,7 +113,7 @@ Format your response as a JSON object with the following fields:
 - target_price: Your price target
 - stop_loss: Recommended stop loss price
 - reasoning: Detailed explanation for your recommendation
-- quantity: Suggested position size (number of shares)
+- quantity: Position size in whole shares, within the limit stated above
 - timeframe: "{self.timeframe}" (your specialty timeframe)
 - data_sources: List of data types you used to make this decision
 

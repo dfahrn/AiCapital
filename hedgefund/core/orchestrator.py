@@ -149,7 +149,12 @@ class Orchestrator:
             for name, analyst in analysts_to_run.items():
                 try:
                     logger.info(f"Running analyst: {name}")
-                    
+
+                    # Tell the analyst what it can actually spend, so its
+                    # quantities fit the real account rather than being
+                    # scaled down by the risk layer later.
+                    self._brief_analyst_on_budget(analyst)
+
                     # Get investment ideas
                     symbols = analyst.get_investment_ideas()
                     logger.info(f"Analyst {name} generated {len(symbols)} investment ideas: {symbols}")
@@ -172,6 +177,19 @@ class Orchestrator:
             logger.error(f"Error in run_analyst_cycle: {e}")
             return []
     
+    def _brief_analyst_on_budget(self, analyst) -> None:
+        """Give an analyst the fund's current size limits before it runs."""
+        try:
+            portfolio_value = self.paper_trader.cash + sum(
+                p.market_value for p in self.paper_trader.positions.values()
+            )
+            analyst.portfolio_value = portfolio_value
+            analyst.max_position_value = (
+                portfolio_value * self.paper_trader.max_position_size
+            )
+        except Exception as e:
+            logger.warning(f"Could not determine the sizing budget: {e}")
+
     def run_fund_manager_cycle(self) -> List[Dict[str, Any]]:
         """
         Run a cycle for the fund manager to evaluate pending recommendations.
@@ -250,7 +268,12 @@ class Orchestrator:
             for name, analyst in self.analysts.items():
                 try:
                     logger.info(f"Running analyst: {name}")
-                    
+
+                    # Tell the analyst what it can actually spend, so its
+                    # quantities fit the real account rather than being
+                    # scaled down by the risk layer later.
+                    self._brief_analyst_on_budget(analyst)
+
                     # Get investment ideas
                     symbols = analyst.get_investment_ideas()
                     logger.info(f"Analyst {name} generated {len(symbols)} investment ideas: {symbols}")
